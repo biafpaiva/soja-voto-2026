@@ -24,7 +24,7 @@ from esda.moran import Moran, Moran_BV, Moran_Local, Moran_Local_BV
 from libpysal.weights import Queen, lag_spatial
 from scipy import stats
 
-st.set_page_config(page_title="Soja x Voto 2026", page_icon="🌱", layout="wide")
+st.set_page_config(page_title="BDG Parte 2", page_icon="🌱", layout="wide")
 
 ROOT = Path(__file__).parent
 DATA, SQLF = ROOT / "data", ROOT / "sql" / "queries.sql"
@@ -248,26 +248,31 @@ def sql_blocks():
 
 # ================================================================ PÁGINAS
 def pg_intro():
-    st.title("🌱 Soja e voto presidencial: o que os municípios mostram?")
+    st.title("🌱 Soja, religião e voto presidencial: padrões espaciais nos municípios")
     st.caption("Trabalho Prático – Parte 2 · Bancos de Dados Geográficos e Ciência de Dados Geoespaciais · DCC/UFMG")
     st.markdown("""
-### Motivação
-Após o 1º turno de 2026, o debate público passou a associar o agronegócio ao voto na direita. Este trabalho
-testa essa narrativa com dados: **a intensidade da produção de soja de um município está associada ao
-percentual de votos de Lula e de Flávio Bolsonaro, os dois candidatos que disputam o 2º turno?**
-A soja é usada como *proxy* do agronegócio de commodities por ser a lavoura de maior área no país, com dados
-públicos e comparáveis em todos os municípios (Pesquisa Agrícola Municipal – PAM/IBGE).
+### Motivação e escopo
+Este projeto investiga duas dimensões territoriais que podem estar associadas aos resultados eleitorais: **a presença da soja**,
+como atividade agrícola específica, e **a composição religiosa** dos municípios, com foco nas proporções de evangélicos e católicos.
+A soja não representa todo o agronegócio, e as duas dimensões não são tratadas como causas isoladas do voto.
 
-### Perguntas
-1. Onde a soja está concentrada no Brasil?
-2. Existe correlação entre intensidade de soja e % de votos em Lula / Flávio? Ela é a mesma em todo o país?
-3. A votação e a soja formam **clusters espaciais** (autocorrelação)? Os clusters de soja e de voto se sobrepõem?
-4. Os resultados se mantêm ao agregar em regiões imediatas e intermediárias (problema da unidade de área modificável)?
+A dimensão religiosa foi motivada pela visibilidade de símbolos e lideranças religiosas no debate eleitoral de 2026, incluindo uma
+controvérsia pública sobre uma alegação relacionada a Nossa Senhora Aparecida.
 
-### Dados e método em uma frase
-Votos por município (TSE) + soja (PAM/IBGE) + malha IBGE 2025, integrados em PostgreSQL/PostGIS; análise
-estatística (Pearson, Spearman, regressão com efeitos fixos de UF) e espacial (Moran global, Moran bivariado e
-LISA, matriz de vizinhança *Queen*) em Python.
+### Perguntas de pesquisa
+1. Onde a soja está concentrada no Brasil e como varia a intensidade da atividade entre municípios?
+2. A intensidade da soja se associa aos percentuais de votos de Lula e Flávio Bolsonaro? A associação varia por UF ou região?
+3. A composição religiosa municipal se associa aos percentuais de votação? Os padrões diferem entre evangélicos, católicos e pessoas sem religião?
+4. A associação entre soja e voto muda quando se consideram religião e efeitos fixos de UF?
+5. Existem agrupamentos espaciais da soja, da votação e da composição religiosa?
+
+### Dados e métodos
+Resultados eleitorais agregados por município (TSE), produção agrícola (PAM/IBGE), dados religiosos do Censo 2022 (IBGE/SIDRA)
+e malhas municipais. São utilizadas estatísticas descritivas, correlações de Pearson e Spearman, comparações por faixas,
+modelos OLS/WLS com erros robustos e efeitos fixos de UF, além de Moran global, Moran bivariado e LISA.
+
+**Limite de interpretação:** os resultados são municipais. Não permitem inferir como produtores, evangélicos ou católicos individuais votaram,
+nem demonstram causalidade.
 """)
     d = analise_mun()
     c = st.columns(4)
@@ -276,6 +281,7 @@ LISA, matriz de vizinhança *Queen*) em Python.
     c[2].metric("Votos válidos", f"{d.votos_validos.sum()/1e6:.1f} mi")
     c[3].metric("% nacional Lula | Flávio",
                 f"{100*d.votos_lula.sum()/d.votos_validos.sum():.1f}% | {100*d.votos_flavio.sum()/d.votos_validos.sum():.1f}%")
+    st.info("Os percentuais nacionais são ponderados pelos votos válidos; as correlações e modelos abaixo usam municípios como unidades de análise.")
 
 
 def pg_eng():
@@ -299,9 +305,9 @@ município/candidato → carga no PostgreSQL → SQLs abaixo integram votos, PAM
   `ANO_ELEICAO=2026`, `NR_TURNO=1`, `DS_CARGO=PRESIDENTE` e agrega por município/candidato (75,5 mil linhas selecionadas →
   69 mil combinações, 12 candidatos). Os 5.757 'municípios' incluem o exterior (`ZZ`), que não tem polígono e é excluído no SQL 01.
 - **Candidatos** identificados por número (13 = Lula, 22 = Flávio Bolsonaro).
-- **Vencedor:** município 'vencido' por quem tem mais votos; categoria ≥ 50,01% ou < 50,01% dos válidos (mapa estilo jornal).
+- **Vencedor:** município 'vencido' por quem tem mais votos; categoria ≥ 50,01% ou < 50,01% dos válidos.
 - **Voto em trânsito:** se a coluna `ST_VOTO_EM_TRANSITO` existir no CSV, o notebook descarta linhas marcadas como voto em trânsito. Os votos desse tipo não pertencem
-  ao município de apuração, mas **retirá-los reduz o total** em relação ao boletim oficial; isso deve ser conferido (SQL 00).
+  ao município de apuração.
 - **Soja ausente = 0.** A PAM só lista quem produz. Municípios sem registro entram com 0 e são separados pela
   variável `produz_soja`.
 - **Intensidade de soja** = `pct_area_soja` (área plantada ÷ área do município). Controla pelo tamanho do município,
@@ -359,8 +365,7 @@ def pg_eda():
     p = df[df.produz_soja].sort_values("soja_prod_t", ascending=False)
     p["acum"] = 100 * p.soja_prod_t.cumsum() / p.soja_prod_t.sum()
     st.markdown(f"Dos **{len(p)}** municípios produtores, os 10% maiores respondem por "
-                f"**{p.acum.iloc[int(len(p)*0.1)-1]:.0f}%** da produção. A distribuição é muito assimétrica, "
-                "por isso a análise usa Spearman e escalas capadas nos mapas.")
+                f"**{p.acum.iloc[int(len(p)*0.1)-1]:.0f}%** da produção.")
     st.plotly_chart(px.line(p.reset_index(drop=True), y="acum", labels={"acum": "% acumulado da produção",
                                                                           "index": "Ranking do município"}, height=320),
                     use_container_width=True)
@@ -644,15 +649,30 @@ correlaciona a soja de uma área com o voto médio dos vizinhos. **LISA** locali
 
 
 def pg_relig():
-    st.header("6. Religião: evangélicos × católicos")
+    st.header("6. Religião: composição religiosa, soja e votação")
     df = analise_mun()
     if "pct_evangelicos" not in df or df.pct_evangelicos.isna().all():
         st.warning("A base não tem as colunas de religião. Rode o bloco 02b e os blocos 03/04 do `queries.sql` e reexporte os CSVs.")
         return
-    st.markdown("Percentuais do **Censo 2022** (SIDRA 10198) sobre a população residente. Pergunta: a composição religiosa do município "
-                "se associa ao voto, e o efeito da soja sobrevive quando se controla por religião?")
-    t1, t2, t3, t4 = st.tabs(["Mapas", "Correlação com o voto", "Modelos: soja × religião", "Soja × religião"])
+
+    st.markdown("""
+Os percentuais religiosos vêm do **Censo Demográfico 2022 (IBGE/SIDRA, tabela 10198)**. 
+
+**Motivação jornalística:** em setembro de 2026 circulou uma alegação sobre uma possível retirada do título de Padroeira do Brasil
+de Nossa Senhora Aparecida.
+
+Leituras de contexto:
+- [CNN Brasil — Entenda a polêmica envolvendo Flávio Bolsonaro e Nossa Senhora Aparecida](https://www.cnnbrasil.com.br/eleicoes/entenda-polemica-envolvendo-flavio-bolsonaro-e-nossa-senhora-aparecida/)
+- [Folha de S.Paulo — Flávio e Lula acenam a católicos com Nossa Senhora após polêmica no primeiro turno](https://www1.folha.uol.com.br/poder/2026/10/flavio-e-lula-acenam-a-catolicos-com-nossa-senhora-apos-polemica-no-primeiro-turno.shtml)
+
+### Perguntas desta seção
+- A proporção de evangélicos e católicos se associa aos percentuais municipais de votação?
+- A associação varia entre estados e faixas de intensidade da soja?
+- O coeficiente da soja muda quando religião e UF entram no modelo?
+""")
+    t1, t2, t3, t4 = st.tabs(["Mapas", "Religião × voto", "Modelos ajustados", "Soja × religião"])
     ys = ["pct_flavio", "pct_lula", "margem_pp"]
+
     with t1:
         c = st.columns(2)
         with c[0]:
@@ -660,123 +680,131 @@ def pg_relig():
         with c[1]:
             _show(png_pct("pct_catolicos", "Católicos nos municípios", "#fbefd0", "#7a4b00"), "pct_catolicos.png", "r2")
         _show(png_pred(), "predominancia_religiosa.png", "r3")
-        st.caption("Quantis (8 classes com mesmo número de municípios) mostram o contraste regional mesmo quando a distribuição é assimétrica.")
+        st.caption("Os mapas mostram padrões territoriais; não permitem inferir a religião ou o voto de indivíduos.")
+
     with t2:
-        xs = [c for c in ["pct_evangelicos", "pct_catolicos", "dif_evang_cat_pp"] if c in df]
-        t = pd.DataFrame([{"Religião": VARS[x], "Voto": VARS[y], **corr_row(df, x, y)} for x in xs for y in ys])
-        st.dataframe(t.style.format({"Pearson": "{:.3f}", "Spearman": "{:.3f}", "p (Pearson)": "{:.1e}", "p (Spearman)": "{:.1e}"}),
+        xs = [c for c in ["pct_evangelicos", "pct_catolicos", "pct_sem_religiao", "dif_evang_cat_pp"] if c in df]
+        t = pd.DataFrame([{"Variável religiosa": VARS[x], "Voto": VARS[y], **corr_row(df, x, y)}
+                          for x in xs for y in ys])
+        st.subheader("Correlação de Pearson e Spearman")
+        st.dataframe(t.style.format({"Pearson": "{:.3f}", "Spearman": "{:.3f}",
+                                     "p (Pearson)": "{:.1e}", "p (Spearman)": "{:.1e}"}),
                      hide_index=True, use_container_width=True)
-        x = st.selectbox("Variável religiosa", xs, format_func=lambda c: VARS[c])
-        y = st.selectbox("Voto", ys, format_func=lambda c: VARS[c], key="rel_y")
-        s_ = df.sample(min(len(df), 4000), random_state=1)
-        st.plotly_chart(px.scatter(s_, x=x, y=y, color="regiao", opacity=0.45, trendline="lowess", trendline_scope="overall",
-                                   hover_name="nm_mun", labels=VARS, height=470), use_container_width=True)
-        st.subheader("Votação por faixa de % de evangélicos")
-        d = df.assign(faixa=pd.cut(df.pct_evangelicos, [0, 10, 20, 30, 40, 101], right=False,
-                                   labels=["< 10%", "10–20%", "20–30%", "30–40%", "≥ 40%"]))
-        f = d.groupby("faixa", observed=True).apply(lambda g: pd.Series({
-            "municípios": len(g), "% Flávio (pond.)": wmean(g, "pct_flavio"), "% Lula (pond.)": wmean(g, "pct_lula")}),
-            include_groups=False).round(1)
-        st.dataframe(f, use_container_width=True)
+        st.caption("Priorize o tamanho e o sinal de Spearman; com milhares de municípios, valores-p pequenos não significam associação forte.")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            x = st.selectbox("Composição religiosa", xs, format_func=lambda c: VARS[c], key="rel_x")
+        with c2:
+            y = st.selectbox("Percentual de voto", ys, format_func=lambda c: VARS[c], key="rel_y")
+        s_ = df[[x, y, "regiao", "nm_mun", "sigla_uf"]].dropna()
+        s_ = s_.sample(min(len(s_), 4000), random_state=1)
+        st.plotly_chart(px.scatter(s_, x=x, y=y, color="regiao", opacity=0.45, trendline="lowess",
+                                   trendline_scope="overall", hover_name="nm_mun", hover_data=["sigla_uf"],
+                                   labels=VARS, height=470, title=f"{VARS[x]} × {VARS[y]} por município"),
+                        use_container_width=True)
+
+        st.subheader("Votação ponderada por faixas de composição religiosa")
+        cat_opts = [x for x in ["pct_evangelicos", "pct_catolicos", "pct_sem_religiao"] if x in df]
+        relig_x = st.selectbox("Agrupar municípios por", cat_opts, format_func=lambda c: VARS[c], key="rel_bins")
+        bins = [-0.001, 10, 20, 30, 40, 50, 100.001]
+        labels = ["<10%", "10–20%", "20–30%", "30–40%", "40–50%", "≥50%"]
+        d = df.copy()
+        d["faixa_religiosa"] = pd.cut(d[relig_x], bins=bins, labels=labels, right=False)
+        f = d.groupby("faixa_religiosa", observed=True).apply(lambda g: pd.Series({
+            "Municípios": len(g), "% Flávio (ponderado)": wmean(g, "pct_flavio"),
+            "% Lula (ponderado)": wmean(g, "pct_lula")}), include_groups=False).reset_index()
+        st.dataframe(f.round(2), hide_index=True, use_container_width=True)
+        plot_f = f.melt(id_vars=["faixa_religiosa", "Municípios"],
+                        value_vars=["% Flávio (ponderado)", "% Lula (ponderado)"],
+                        var_name="Candidato", value_name="% dos votos válidos")
+        st.plotly_chart(px.bar(plot_f, x="faixa_religiosa", y="% dos votos válidos", color="Candidato",
+                               barmode="group", hover_data=["Municípios"], height=400,
+                               labels={"faixa_religiosa": VARS[relig_x]},
+                               color_discrete_map={"% Flávio (ponderado)": "#2c7bb6",
+                                                   "% Lula (ponderado)": "#d7191c"}),
+                        use_container_width=True)
+
         st.subheader("Votação por predominância religiosa")
-        p = df.groupby("predominancia").apply(lambda g: pd.Series({
-            "municípios": len(g), "Lula venceu (%)": 100 * (g.vencedor == "LULA").mean(),
-            "% Flávio (pond.)": wmean(g, "pct_flavio"), "% Lula (pond.)": wmean(g, "pct_lula")}), include_groups=False).round(1)
+        p = df.dropna(subset=["predominancia"]).groupby("predominancia").apply(lambda g: pd.Series({
+            "Municípios": len(g), "Flávio vence (% municípios)": 100 * (g.vencedor == "FLAVIO").mean(),
+            "Lula vence (% municípios)": 100 * (g.vencedor == "LULA").mean(),
+            "% Flávio (ponderado)": wmean(g, "pct_flavio"), "% Lula (ponderado)": wmean(g, "pct_lula")}),
+            include_groups=False).round(1)
         st.dataframe(p.rename(index=PRED_ROT), use_container_width=True)
-        st.subheader("A relação varia por UF? (Spearman, % evangélicos × % Flávio)")
-        u = pd.DataFrame([{"UF": uf, "rho": stats.spearmanr(g.pct_evangelicos, g.pct_flavio)[0]}
-                          for uf, g in df.groupby("sigla_uf") if len(g) >= 15]).sort_values("rho")
-        st.plotly_chart(px.bar(u, x="UF", y="rho", height=360), use_container_width=True)
+
+        st.subheader("A associação varia por UF?")
+        u_rows = []
+        for uf, g in df.groupby("sigla_uf"):
+            for x in ["pct_evangelicos", "pct_catolicos"]:
+                for y in ["pct_flavio", "pct_lula"]:
+                    q = g[[x, y]].dropna()
+                    if len(q) >= 15 and q[x].nunique() > 1 and q[y].nunique() > 1:
+                        u_rows.append({"UF": uf, "Religião": VARS[x], "Voto": VARS[y],
+                                       "rho": stats.spearmanr(q[x], q[y]).statistic, "n": len(q)})
+        u = pd.DataFrame(u_rows)
+        if not u.empty:
+            u["Série"] = u["Religião"] + " × " + u["Voto"]
+            st.plotly_chart(px.bar(u, x="UF", y="rho", color="Série", barmode="group",
+                                   hover_data=["n"], height=440, title="Spearman por UF"),
+                            use_container_width=True)
+        st.caption("Comparações por faixa e predominância são descritivas e ponderadas por votos válidos. Não identificam o voto individual de grupos religiosos.")
+
     with t3:
+        st.markdown("Modelos OLS/WLS com erros-padrão robustos HC3. Os coeficientes são associações condicionais; não devem ser interpretados causalmente.")
         yv = st.selectbox("Variável dependente", ys, format_func=lambda c: VARS[c], key="rel_m")
         pond = st.checkbox("Ponderar por votos válidos (WLS)", key="rel_w")
-        dd = df.dropna(subset=["pct_evangelicos", "pct_catolicos", yv]).copy()
+        needed = ["pct_evangelicos", "pct_catolicos", "pct_area_soja", yv, "votos_validos", "sigla_uf"]
+        dd = df.dropna(subset=[c for c in needed if c in df]).copy()
         rel = "pct_evangelicos + pct_catolicos"
-        specs = {"R1: só religião": rel, "R2: só soja": "pct_area_soja", "R3: soja + religião": f"pct_area_soja + {rel}",
-                 "R4: R3 + efeitos fixos de UF": f"pct_area_soja + {rel} + C(sigla_uf)"}
+        specs = {"R1: só religião": rel, "R2: só soja": "pct_area_soja",
+                 "R3: soja + religião": f"pct_area_soja + {rel}",
+                 "R4: soja + religião + UF": f"pct_area_soja + {rel} + C(sigla_uf)"}
         if "populacao" in dd and dd.populacao.gt(0).all():
             specs["R5: R4 + log(população)"] = f"pct_area_soja + {rel} + C(sigla_uf) + np.log(populacao)"
         out = []
         for nome, rhs in specs.items():
             kw = dict(weights=dd.votos_validos) if pond else {}
             m = (smf.wls if pond else smf.ols)(f"{yv} ~ {rhs}", dd, **kw).fit(cov_type="HC3")
-            out.append({"Modelo": nome, **{VARS[k]: m.params.get(k, np.nan) for k in ["pct_area_soja", "pct_evangelicos", "pct_catolicos"]},
-                        "R²": m.rsquared, "n": int(m.nobs)})
-        o = pd.DataFrame(out)
-        o = o.rename(columns={"% da área do município com soja": "Soja (p.p./p.p.)"})
-        st.dataframe(o.style.format({c: "{:.3f}" for c in o.columns if c not in ("Modelo", "n")}, na_rep="—"),
-                     hide_index=True, use_container_width=True)
-        st.caption("Coeficientes em pontos percentuais de voto por ponto percentual da variável explicativa. Compare o coeficiente da soja em "
-                   "R2 (sozinha) com R3–R5: se cai muito, parte do 'efeito soja' era composição religiosa/regional.")
+            row = {"Modelo": nome, "R²": m.rsquared, "n": int(m.nobs)}
+            for term in ["pct_area_soja", "pct_evangelicos", "pct_catolicos"]:
+                if term in m.params.index:
+                    ci = m.conf_int().loc[term]
+                    row[f"{VARS[term]} — coef."] = round(m.params[term], 4)
+                    row[f"{VARS[term]} — p"] = f"{m.pvalues[term]:.2e}"
+                    row[f"{VARS[term]} — IC95%"] = f"[{ci[0]:.3f}; {ci[1]:.3f}]"
+            out.append(row)
+        st.dataframe(pd.DataFrame(out), hide_index=True, use_container_width=True)
+        st.caption("Compare R2 com R3–R5 para avaliar quanto o coeficiente da soja muda após incluir religião e UF. Percentuais religiosos podem ser correlacionados entre si.")
+        if "pct_sem_religiao" in df:
+            st.info("O percentual sem religião aparece nas análises descritivas, mas não foi incluído junto com evangélicos e católicos para reduzir problemas de colinearidade entre proporções.")
+
     with t4:
-        r = {x: corr_row(df, "pct_area_soja", x) for x in ["pct_evangelicos", "pct_catolicos"]}
-        st.markdown(f"Spearman entre % de área com soja e % evangélicos: **{r['pct_evangelicos']['Spearman']:.2f}**; "
-                    f"com % católicos: **{r['pct_catolicos']['Spearman']:.2f}**.")
+        rel_vars = [x for x in ["pct_evangelicos", "pct_catolicos", "pct_sem_religiao"] if x in df]
+        r = {x: corr_row(df, "pct_area_soja", x) for x in rel_vars}
+        st.subheader("Associação entre intensidade de soja e composição religiosa")
+        st.dataframe(pd.DataFrame([{"Variável religiosa": VARS[x], **r[x]} for x in rel_vars]).style.format(
+            {"Pearson": "{:.3f}", "Spearman": "{:.3f}", "p (Pearson)": "{:.1e}", "p (Spearman)": "{:.1e}"}),
+            hide_index=True, use_container_width=True)
         d = df.assign(faixa=classes_soja(df.pct_area_soja))
-        g = d.groupby(["faixa", "predominancia"], observed=True).apply(lambda q: pd.Series({
-            "n": len(q), "pct_flavio": wmean(q, "pct_flavio")}), include_groups=False).reset_index()
+        g = d.dropna(subset=["predominancia"]).groupby(["faixa", "predominancia"], observed=True).apply(lambda q: pd.Series({
+            "n": len(q), "% Flávio": wmean(q, "pct_flavio"), "% Lula": wmean(q, "pct_lula")}),
+            include_groups=False).reset_index()
         g["predominancia"] = g.predominancia.map(PRED_ROT)
-        st.plotly_chart(px.bar(g, x="faixa", y="pct_flavio", color="predominancia", barmode="group", height=430,
+        cand = st.selectbox("Candidato para comparar por soja e predominância religiosa",
+                            ["% Flávio", "% Lula"], key="soja_relig_cand")
+        st.plotly_chart(px.bar(g, x="faixa", y=cand, color="predominancia", barmode="group", height=430,
                                hover_data=["n"], color_discrete_map={PRED_ROT[k]: v for k, v in PRED_COR.items()},
-                               labels={"pct_flavio": "% Flávio (ponderado)", "faixa": "% de área com soja"}),
+                               labels={cand: f"{cand} (ponderado)", "faixa": "% de área com soja"},
+                               title=f"{cand} por intensidade de soja e predominância religiosa"),
                         use_container_width=True)
-        st.caption("Dentro de cada faixa de soja, a diferença entre as barras mostra o papel da religião; dentro de cada cor, a diferença "
-                   "entre faixas mostra o papel da soja.")
-
-
-def pg_concl():
-    st.header("7. Achados e limitações")
-    df = analise_mun()
-    r_f = corr_row(df, "pct_area_soja", "pct_flavio")["Spearman"]
-    r_l = corr_row(df, "pct_area_soja", "pct_lula")["Spearman"]
-    p = df[df.produz_soja]
-    rp_f = corr_row(p, "pct_area_soja", "pct_flavio")["Spearman"]
-    st.subheader("Resumo numérico (gerado automaticamente a partir dos dados)")
-    st.markdown(f"""
-- Correlação de Spearman entre % de área com soja e % Flávio: **{r_f:.2f}**; com % Lula: **{r_l:.2f}** (todos os municípios).
-- Restringindo aos **{len(p)}** produtores de soja, Spearman com % Flávio: **{rp_f:.2f}**.
-- Moran global de % Flávio no nível municipal: **{global_moran('mun','pct_flavio')[0]:.2f}**;
-  da soja: **{global_moran('mun','pct_area_soja')[0]:.2f}**;
-  bivariado soja → Flávio: **{global_moran('mun','pct_area_soja','pct_flavio')[0]:.2f}**.
-- Moran de % Flávio por nível: município **{global_moran('mun','pct_flavio')[0]:.2f}**, região imediata
-  **{global_moran('micro','pct_flavio')[0]:.2f}**, região intermediária **{global_moran('meso','pct_flavio')[0]:.2f}**.
-""")
-    if "pct_evangelicos" in df and df.pct_evangelicos.notna().any():
-        e = corr_row(df, "pct_evangelicos", "pct_flavio")["Spearman"]
-        c_ = corr_row(df, "pct_catolicos", "pct_flavio")["Spearman"]
-        st.markdown(f"- Religião: Spearman de % Flávio com % evangélicos **{e:.2f}** e com % católicos **{c_:.2f}**. "
-                    "Veja a página 6 para saber se o efeito da soja persiste ao controlar por religião.")
-    st.subheader("Interpretação")
-    st.markdown("""
-Escreva aqui a leitura final com base nas páginas 3 a 5 (edite este bloco no `app.py`). Sugestões de pontos a discutir:
-- A associação soja × voto é forte, fraca ou desaparece dentro das UFs (compare M1 × M2 da regressão)?
-- O sinal é o mesmo no Centro-Oeste, no Sul e no MATOPIBA? (gráfico por UF)
-- Os clusters Alto-Alto de soja coincidem com os de Flávio? Há clusters de soja onde Lula vai bem?
-- O padrão persiste em regiões imediatas e intermediárias?
-""")
-    st.subheader("Limitações")
-    st.markdown("""
-- **Falácia ecológica:** correlação entre municípios não diz como *produtores* ou *trabalhadores rurais* votam.
-- **Soja ≠ agronegócio.** Pecuária, cana, milho, café e a cadeia industrial ficam de fora; municípios sem soja podem
-  ser fortemente agropecuários.
-- **Confundidores:** renda, escolaridade, religião, urbanização e tamanho populacional se correlacionam com soja e com voto.
-- **Defasagem temporal:** PAM do ano mais recente disponível × eleição de 2026.
-- **Zeros inflados e assimetria:** milhares de municípios sem soja; por isso Spearman e análise por faixas.
-- **MAUP e vizinhança:** os resultados dependem do nível de agregação e da definição de vizinhos (Queen sobre geometria simplificada).
-- **Denominador:** votos válidos entre candidatos presidenciais; voto em trânsito descartado no pré-processamento.
-- **Correlação não é causalidade.**
-""")
-    st.subheader("Referências")
-    st.markdown("- TSE – Portal de Dados Abertos: https://dadosabertos.tse.jus.br/\n"
-                "- IBGE – Pesquisa Agrícola Municipal (SIDRA, tab. 1612) e Malhas Territoriais 2025\n"
-                "- Anselin, L. (1995). *Local indicators of spatial association – LISA.* Geographical Analysis.\n"
-                "- PySAL (`libpysal`, `esda`), GeoPandas, Plotly, Streamlit.")
+        st.caption("Compare faixas de soja dentro de cada categoria religiosa e categorias religiosas dentro de cada faixa. A leitura é descritiva, não causal.")
 
 
 # ================================================================= ROUTER
 PAGES = {"Introdução": pg_intro, "1. Engenharia de dados": pg_eng, "2. Exploratória": pg_eda, "3. Mapas": pg_maps,
-         "4. Correlação": pg_corr, "5. Autocorrelação espacial": pg_spatial, "6. Religião": pg_relig, "7. Achados e limitações": pg_concl}
-st.sidebar.title("Soja × Voto 2026")
+         "4. Correlação": pg_corr, "5. Autocorrelação espacial": pg_spatial, "6. Religião": pg_relig}
+st.sidebar.title("Voto 2026")
 sel = st.sidebar.radio("Seções", list(PAGES))
 st.sidebar.caption("Dados: TSE, IBGE (PAM, malhas 2025). Percentuais sobre votos válidos.")
 if sel != "1. Engenharia de dados":
